@@ -1,0 +1,10 @@
+/out:..\..\vd\common\bin\Virtusales.Biblio.API.dll
+/t:library
+Virtusales.Biblio.API.Request.vb
+Virtusales.Biblio.API.Session.vb
+
+
+/verbose
+/debug:pdbonly
+/optimize
+/warnaserror
