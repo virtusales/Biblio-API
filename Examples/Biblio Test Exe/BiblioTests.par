@@ -1,0 +1,10 @@
+/out:.\compiled\APITestEXE
+/t:exe
+BiblioTests.APITestEXE.exe.vb
+
+/r:..\..\portable\virtusales.biblio.api.dll
+
+/verbose
+/debug:pdbonly
+/optimize
+/warnaserror
