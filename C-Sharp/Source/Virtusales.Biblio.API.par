@@ -1,0 +1,8 @@
+/out:..\Portable\Virtusales.Biblio.API.dll
+/t:library
+Virtusales.Biblio.API.Request.cs
+Virtusales.Biblio.API.Session.cs
+
+/debug:pdbonly
+/optimize
+/warnaserror
