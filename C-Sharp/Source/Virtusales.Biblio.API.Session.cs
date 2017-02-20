@@ -1,76 +1,85 @@
 using Microsoft.VisualBasic;
-using Virtusales.Biblio.API;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
+using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 
 namespace Virtusales.Biblio.API
 {
-	public class Session
+	internal class Session : BiblioAPIBase
 	{
-		public string URL;
-		public string Username;
-		public string Password;
-		public string Detail;
-		public string AuthenticationString;
-		public string SessionID;
+		private RequestObject<LoginRequestData, LoginResponseData> LoginRequest;
+		private string Username;
+		private string Password;
 
-		public bool DebugToConsole;
-		public Session(string URL, string Username, string Password)
-		{
-			this.URL = URL;
-			this.Username = Username;
-			this.Password = Password;
+		public string ErrorMessage = "";
+
+		private string _Token;
+		public string Token {
+			get { return _Token; }
+			private set { _Token = value; }
 		}
 
-		[DataContract()]
-		private class APILoginResponse
+		public Session(string applicationName, string url, string username, string password)
 		{
-			[DataMember()]
-			public bool success = true;
-			[DataMember()]
-			public string detail = "";
-			[DataMember()]
-			public string sessionid = "";
+			this.Username = username;
+			this.Password = password;
+			this.LoginRequest = new RequestObject<LoginRequestData, LoginResponseData>(applicationName, url, "APILogin");
+			this.LoginRequest.DebugToConsole = this.DebugToConsole;
 		}
 
-		[DataContract()]
-		private class APILoginRequest
+		public bool Login(ref string errorMessage = "")
 		{
-			[DataMember()]
-			public string username;
-			[DataMember()]
-			public string password;
-		}
-
-		public bool Login()
-		{
-			APILoginRequest RequestData = new APILoginRequest {
-				username = Username,
-				password = Password
+			LoginRequestData RequestData = new LoginRequestData {
+				Username = Username,
+				Password = Password
 			};
-			Virtusales.Biblio.API.Request Req = NewRequest("apilogin", "DoLogin");
-			APILoginResponse Resp = Req.SendObject<APILoginRequest, APILoginResponse>(RequestData);
-			Detail = Resp.detail;
-			SessionID = Resp.sessionid;
-			AuthenticationString = "&sessioncookie=" + Resp.sessionid + "&usercookie=" + Username;
-			return Resp.success;
+			ResponseObject<LoginResponseData> Response = new ResponseObject<LoginResponseData>();
+
+			Token = "";
+
+			Response = LoginRequest.PostRequest(RequestData);
+
+			if (Response.Success) {
+				if (Response.Value.Success) {
+					Token = Response.Value.SessionToken;
+				} else {
+					errorMessage = "Reason: " + Response.Value.Detail;
+					return false;
+				}
+			} else if (Response.StatusCode == HttpStatusCode.Unauthorized) {
+				errorMessage = "Unauthorised: " + Response.ErrorMessage;
+				return false;
+			} else {
+				errorMessage = Response.ErrorMessage + Constants.vbCrLf + "Response HTTP State Code was: " + Convert.ToInt32(Response.StatusCode) + " " + Response.StatusCode.ToString() + Constants.vbCrLf + "Response was: " + Response.RawText;
+				return false;
+			}
+
+			return true;
 		}
 
-		public Virtusales.Biblio.API.Request NewRequest(string Page, string Path)
+		[DataContract()]
+		private class LoginRequestData
 		{
-			Virtusales.Biblio.API.Request R = new Virtusales.Biblio.API.Request();
-			R.URL = URL;
-			R.AuthenticationString = AuthenticationString;
-			R.Page = Page;
-			R.Path = Path;
-			R.DebugToConsole = DebugToConsole;
-			return R;
+			[DataMember(Name = "username", IsRequired = true)]
+			public string Username;
+			[DataMember(Name = "password", IsRequired = true)]
+			public string Password;
 		}
 
+		[DataContract()]
+		private class LoginResponseData
+		{
+			[DataMember(Name = "success", IsRequired = true)]
+			public bool Success;
+			[DataMember(Name = "detail", IsRequired = true)]
+			public string Detail;
+			[DataMember(Name = "sessiontoken", IsRequired = true)]
+			public string SessionToken;
+		}
 	}
 }

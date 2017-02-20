@@ -1,8 +1,8 @@
-/out:.\compiled\APITestEXE
-/t:exe
+/out:APITestEXE
+/t:library
 BiblioTests.APITestEXE.exe.vb
 
-/r:..\..\portable\virtusales.biblio.api.dll
+/r:..\Portable\virtusales.biblio.api.dll
 
 /verbose
 /debug:pdbonly

@@ -1,7 +1,10 @@
-/out:..\..\vd\common\bin\Virtusales.Biblio.API.dll
+/out:..\Portable\Virtusales.Biblio.API.dll
 /t:library
+Virtusales.Biblio.API.BiblioService.vb
+Virtusales.Biblio.API.BiblioAPIBase.vb
 Virtusales.Biblio.API.Request.vb
 Virtusales.Biblio.API.Session.vb
+Virtusales.Biblio.API.FormattingOption.vb
 
 
 /verbose

@@ -1,125 +1,235 @@
 using Microsoft.VisualBasic;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
-using System.IO;
 using System.Text;
+using System.Web;
+using System.Web.Script.Serialization;
 
 namespace Virtusales.Biblio.API
 {
-	public class Request
+	public abstract class RequestBase : BiblioAPIBase
 	{
-		public string URL;
-		public string Page;
-		public string Path;
-		public string View = "json";
-		public string AuthenticationString;
-		public string RequestProtocol = "json";
-		public string Post;
-		public string Response;
-		public bool DebugToConsole;
+		private string ApplicationName;
+		private string URL;
+		private string Page;
+		private string Path;
+		private FormattingOption ResponseFormat;
+		private Session _Session;
 
-		public string MakeQueryString()
-		{
-			return "fwpath=" + Path + "&fwview=" + View + AuthenticationString;
+		internal Session Session {
+			get { return _Session; }
+			set { _Session = value; }
 		}
 
-		public string MakeURL()
+		internal RequestBase(string applicationName, string url, string page, string executionPath = "", FormattingOption responseFormat = FormattingOption.JSON)
 		{
-			return URL + Page + ".aspx?" + MakeQueryString();
+			this.URL = url;
+			this.Page = page;
+			this.Path = executionPath;
+			this.ResponseFormat = responseFormat;
+
+			if (page.EndsWith(".aspx"))
+				page = page.Substring(0, page.Length - 5);
 		}
 
-		public string FetchString()
+		private string ConstructQueryString()
 		{
-			Dbg("----------------------- REQUEST -----------------------");
-			WebClient WC = new WebClient();
-			WC.Headers.Add("User-Agent", "API:APITests");
-			//Ensure your string starts API: and then add a string describing your application.
+			return "?fwpath=" + string.IsNullOrEmpty(Path) ? "default" : Path;
+		}
 
-			string WholeURL = MakeURL();
+		private string ConstructURL()
+		{
+			return URL + !URL.EndsWith("\\") ? "\\" : "" + Page + ".aspx" + ConstructQueryString();
+		}
 
-			Dbg("URL: " + WholeURL);
-
-			if (string.IsNullOrEmpty(Post)) {
-				Response = WC.DownloadString(WholeURL);
-			} else {
-				switch (RequestProtocol.ToLower()) {
-					case "text":
-					case "form":
-					case "":
-						WC.Headers.Add("Content-Type", "application/x-www-form-urlencoded");
-						Dbg("Set the request protocol headers as Encoded Text Form");
-						break;
-					case "json":
-						WC.Headers.Add("Content-Type", "application/json");
-						Dbg("Set the request protocol headers as JSON");
-						break;
-					case "xml":
-						WC.Headers.Add("Content-Type", "application/xml");
-						Dbg("Set the request protocol headers as XML");
-						break;
-					default:
-						throw new System.Exception("Invalid Request Protocol");
-				}
-				Dbg("Post: " + Post);
-				Response = WC.UploadString(WholeURL, Post);
+		private string GetRequestMIMEFormat()
+		{
+			switch (ResponseFormat) {
+				case FormattingOption.JSON:
+					return "application/json";
+				case FormattingOption.XML:
+					return "application/xml";
+				case FormattingOption.CSV:
+					return "text/csv";
+				case FormattingOption.TSV:
+					return "text/tsv";
+				case FormattingOption.Excel:
+					return "application/vnd.ms-excel";
+				default:
+					throw new NotSupportedException("Unsupported Formatting Option: " + ResponseFormat.ToString());
 			}
-			Dbg("----------------------- /REQUEST -----------------------");
-			Dbg("----------------------- RESPONSE -----------------------");
-			Dbg(Response);
-			Dbg("----------------------- /RESPONSE -----------------------");
+		}
 
+		protected bool PostRequestInternal(ref ResponseBasic Response, string postData = null)
+		{
+			try {
+				Debug("----------------------- REQUEST -----------------------");
+
+				string FullURL = ConstructURL();
+
+				HTTPWebRequest WRequest = WebRequest.Create(FullURL);
+				WRequest.ContentType = "application/json";
+				WRequest.UserAgent = "API:" + ApplicationName;
+				WRequest.Accept = GetRequestMIMEFormat();
+
+				if (Session != null) {
+					WRequest.Headers("Authorization") = Session.Token;
+				}
+
+				Debug("URL: " + FullURL);
+
+				if (postData == null) {
+					Debug("GET Request");
+				} else {
+					Debug("POST Request - JSON Encoded Body: " + postData);
+					WRequest.Method = WebRequestMethods.Http.Post;
+					using (Stream DataStream = WRequest.GetRequestStream()) {
+						using (StreamWriter Writer = new StreamWriter(DataStream)) {
+							Writer.Write(postData);
+						}
+					}
+				}
+
+				using (HTTPWebResponse WResponse = WRequest.GetResponse()) {
+					using (Stream DataStream = WResponse.GetResponseStream()) {
+						using (StreamReader Reader = new StreamReader(DataStream)) {
+							Response.RawText = Reader.ReadToEnd();
+						}
+					}
+					Response.StatusCode = WResponse.StatusCode;
+				}
+
+
+				Debug("----------------------- /REQUEST -----------------------");
+				Debug("----------------------- RESPONSE -----------------------");
+				Debug(Response.RawText);
+				Debug("----------------------- /RESPONSE -----------------------");
+			} catch (WebException E) {
+				using (HTTPWebResponse WResponse = E.Response()) {
+					using (Stream DataStream = WResponse.GetResponseStream()) {
+						using (StreamReader Reader = new StreamReader(DataStream)) {
+							Response.RawText = Reader.ReadToEnd();
+						}
+					}
+					Response.StatusCode = WResponse.StatusCode;
+					Response.ErrorMessage = "A WebException was thrown: " + E.ToString();
+				}
+				return true;
+			} catch (Exception E) {
+				Response.Success = false;
+				Response.ErrorMessage = "Unable to send HTTP request!" + Constants.vbCrLf + E.ToString();
+				return false;
+			}
+
+			return true;
+		}
+	}
+
+	public class RequestBasic : RequestBase
+	{
+		internal RequestBasic(string applicationName, string url, string page, string executionPath = "", FormattingOption responseFormat = FormattingOption.JSON) : base(applicationName, url, page, executionPath: executionPath, responseFormat: responseFormat)
+		{
+		}
+
+		public ResponseBasic PostRequest(string postData)
+		{
+			ResponseBasic Response = new ResponseBasic();
+			PostRequestInternal(ref Response, postData: postData);
 			return Response;
 		}
 
-		public ResponseObject SendObject<RequestObject, ResponseObject>(RequestObject O)
+	}
+
+	public class RequestObject<TRequest, TResponse> : RequestBase
+	{
+		internal RequestObject(string applicationName, string url, string page, string executionPath = "") : base(applicationName, url, page, executionPath: executionPath, responseFormat: FormattingOption.JSON)
 		{
-			Post = Serialise(O);
-			View = "json";
-			RequestProtocol = "json";
-			return DeSerialise<ResponseObject>(FetchString());
 		}
 
-		public ResponseObject FetchObject<ResponseObject>()
+		public ResponseObject<TResponse> PostRequest(TRequest PostObject)
 		{
-			View = "json";
-			return DeSerialise<ResponseObject>(FetchString());
+			ResponseObject<TResponse> Response = new ResponseObject<TResponse>();
+			string EncodedPostData = SerialiseRequestObject(PostObject);
+			if (PostRequestInternal(ref Response, postData: EncodedPostData)) {
+				DeSerialiseResponseObject(ref Response);
+			}
+			return Response;
 		}
 
-		public ObjType DeSerialise<ObjType>(string JSON)
+		public ResponseObject<TResponse> GetRequest()
+		{
+			ResponseObject<TResponse> Response = new ResponseObject<TResponse>();
+			if (PostRequestInternal(Response)) {
+				DeSerialiseResponseObject(ref Response);
+			}
+			return Response;
+		}
+
+		private bool DeSerialiseResponseObject(ref ResponseObject<TResponse> Response)
+		{
+			Response.Value = DeserializeResponse(Response.RawText);
+			if (Response.Value != null) {
+				Response.Success = true;
+			} else {
+				Response.Success = false;
+				JavaScriptSerializer JSSerial = new JavaScriptSerializer();
+				Dictionary<string, object> ResponseParams = default(Dictionary<string, object>);
+				try {
+					ResponseParams = JSSerial.DeserializeObject(Response.RawText);
+
+					if (!(ResponseParams.TryGetValue("errormessage", Response.ErrorMessage) || ResponseParams.TryGetValue("error", Response.ErrorMessage))) {
+						Response.ErrorMessage = "Unexpected Result";
+					}
+				} catch {
+					Response.ErrorMessage = "Could not deserialise object of type [" + typeof(TResponse).ToString() + "] from server response";
+				}
+			}
+			return Response.Success;
+		}
+
+		private TResponse DeserializeResponse(string JSON)
 		{
 			DataContractJsonSerializerSettings Settings = new DataContractJsonSerializerSettings();
 			Settings.UseSimpleDictionaryFormat = true;
-			DataContractJsonSerializer Serializer = new DataContractJsonSerializer(typeof(ObjType), Settings);
+			DataContractJsonSerializer Serializer = new DataContractJsonSerializer(typeof(TResponse), Settings);
 			MemoryStream MemStream = new MemoryStream(Encoding.Unicode.GetBytes(JSON));
-			ObjType RetObject = default(ObjType);
+
 			try {
-				RetObject = (ObjType)Serializer.ReadObject(MemStream);
-			} catch(System.Exception e) {
-				throw new System.Exception("Could not deserialise object of type [" + typeof(ObjType).ToString() + "] from JSON " + JSON + " " + e.ToString());
+				return Serializer.ReadObject(MemStream);
+			} catch {
+				return null;
 			}
-			return RetObject;
 		}
 
-		public string Serialise<ObjType>(ObjType O)
+		private string SerialiseRequestObject(TRequest O)
 		{
 			MemoryStream MS = new MemoryStream();
-			DataContractJsonSerializer Ser = new DataContractJsonSerializer(O.GetType());
+			DataContractJsonSerializer Ser = new DataContractJsonSerializer(typeof(TRequest));
 			Ser.WriteObject(MS, O);
 			MS.Position = 0;
 			StreamReader SR = new StreamReader(MS);
 			return SR.ReadToEnd();
 		}
 
-		public void Dbg(string Str)
-		{
-			if (DebugToConsole)
-				 System.Console.WriteLine(Str);
-		}
+	}
 
+	public class ResponseBasic
+	{
+		public bool Success;
+		public HttpStatusCode StatusCode;
+		public string RawText;
+		public string ErrorMessage = "";
+	}
+
+	public class ResponseObject<T> : ResponseBasic
+	{
+		public T Value = null;
 	}
 }

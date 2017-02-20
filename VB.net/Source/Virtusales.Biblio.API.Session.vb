@@ -1,62 +1,71 @@
-imports virtusales.biblio.api.request
-imports system.runtime.serialization
-imports system.runtime.serialization.json
+Imports System.Net
+Imports System.Runtime.Serialization
+Imports System.Runtime.Serialization.Json
 
-'auto <-- Add this to automatically action all suggestions ('auto alone on a line)
-'SUGGESTION: Following [1] Line could be 'automatic-importblock-system
-imports system
-
-namespace virtusales.biblio.api
-public class session
-    public URL as string
-    public Username as string
-    public Password as string
-    public Detail as string
-    public AuthenticationString as string
-    public SessionID as string
-    public DebugToConsole as boolean
-
-    sub New(URL as string,Username as string,Password as string)
-        me.url=url
-        me.username=username
-        me.password=password
-    end sub
+Namespace Virtusales.Biblio.API
+    Friend Class Session : Inherits BiblioAPIBase
+        Private LoginRequest As RequestObject(Of LoginRequestData, LoginResponseData)
+        Private Username As String
+        Private Password As String
+        
+        Public ErrorMessage As String = ""
+        
+        Private _Token As String
+        Public Property Token As String
+            Get
+                Return _Token
+            End Get
+            Private Set(Value As String)
+                _Token = Value
+            End Set
+        End Property
     
-    <DataContract>
-    private class APILoginResponse
-        <DataMember> public success as string
-        <DataMember> public detail as string
-        <DataMember> public sessionid as string
-    end class    
-
-    <DataContract>
-    private class APILoginRequest
-        <DataMember> public username as string
-        <DataMember> public password as string
-    end class    
-
-    function Login as boolean
-        dim RequestData as new APILoginRequest with {
-            .username=username,
-            .password=password
-        }
-        dim Req = NewRequest("apilogin","DoLogin")
-        dim Resp = Req.SendObject(of APILoginRequest,APILoginResponse)(RequestData)
-        Detail=Resp.detail
-        SessionID=Resp.SessionID
-        AuthenticationString = "&sessioncookie=" & Resp.SessionID & "&usercookie=" & username
-        return Resp.Success
-    end function
+        Public Sub New(applicationName As String, url As String, username As String, password As String)
+            Me.Username = username
+            Me.Password = password
+            Me.LoginRequest = New RequestObject(Of LoginRequestData, LoginResponseData)(applicationName, url, "APILogin")
+            Me.LoginRequest.DebugToConsole = Me.DebugToConsole
+        End Sub  
     
-    function NewRequest(Page as string,Path as string) as Request
-        dim R as new request
-        R.URL=URL
-        R.AuthenticationString=AuthenticationString
-        R.Page=Page
-        R.Path=Path
-        R.DebugToConsole=DebugToConsole
-        return R
-    end function
-
-end class
-end namespace
+        Public Function Login(ByRef Optional errorMessage As String = "") As Boolean
+            Dim RequestData As New LoginRequestData With { .Username = Username, .Password = Password }
+            Dim Response As New ResponseObject(Of LoginResponseData)
+            
+            Token = ""
+            
+            Response = LoginRequest.PostRequest(RequestData)
+            
+            If Response.Success Then
+                If Response.Value.Success Then
+                    Token = Response.Value.SessionToken
+                Else
+                    ErrorMessage = "Reason: " & Response.Value.Detail
+                    Return False
+                End If
+            Else If Response.StatusCode = HttpStatusCode.Unauthorized Then
+                errorMessage = "Unauthorised: " & Response.ErrorMessage
+                Return False
+            Else
+                errorMessage =  Response.ErrorMessage & vbCrLf & _
+                                "Response HTTP State Code was: " & CInt(Response.StatusCode) & " " & Response.StatusCode.ToString() & vbCrLf & _
+                                "Response was: " & Response.RawText
+                Return False
+            End If
+            
+            Return True
+        End Function
+    
+        <DataContract>
+        Private Class LoginRequestData
+            <DataMember(Name := "username", IsRequired := True)> Public Username As String
+            <DataMember(Name := "password", IsRequired := True)> Public Password As String
+        End Class    
+        
+        <DataContract>
+        Private Class LoginResponseData
+            <DataMember(Name := "success", IsRequired := True)> Public Success As Boolean
+            <DataMember(Name := "detail", IsRequired := True)> Public Detail As String
+            <DataMember(Name := "sessiontoken", IsRequired := True)> Public SessionToken As String
+        End Class  
+    End Class
+End Namespace
